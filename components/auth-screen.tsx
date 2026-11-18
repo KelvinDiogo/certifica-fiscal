@@ -88,7 +88,7 @@ export function AuthScreen({ configured }: { configured: boolean }) {
       </section>
       <section className="auth-form-wrap">
         <div className="auth-form">
-          <span className="pill">CERTIFICA · PRIMEIRA VERSÃO</span>
+          <span className="pill">SUA OPERAÇÃO FISCAL, EM UM SÓ LUGAR</span>
           <h2>
             {configured
               ? mode === "login"

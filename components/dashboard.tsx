@@ -1,6 +1,15 @@
 "use client";
-import { useState, useEffect, useCallback, type FormEvent } from "react";
 import {
+  useState,
+  useEffect,
+  useCallback,
+  type FormEvent,
+  Fragment,
+} from "react";
+import {
+  Mail,
+  FileSpreadsheet,
+  ClipboardList,
   ShieldCheck,
   LayoutDashboard,
   Building2,
@@ -30,6 +39,11 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Dialog } from "./dialog";
+import {
+  OperationalModule,
+  ModuleOverview,
+  type ModuleTab,
+} from "./operational-modules";
 import type {
   Organization,
   DashboardData,
@@ -45,6 +59,7 @@ import {
   latestCertificates,
 } from "@/lib/domain.mjs";
 type Tab =
+  | ModuleTab
   | "overview"
   | "companies"
   | "certificates"
@@ -63,8 +78,16 @@ const NAV = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "companies", label: "Empresas", icon: Building2 },
   { id: "certificates", label: "Certidões", icon: Files },
-  { id: "alerts", label: "Central de alertas", icon: Bell },
-  { id: "jobs", label: "Automações", icon: Workflow },
+  { id: "inbox", label: "Caixa postal fiscal", icon: Mail },
+  { id: "obligations", label: "Obrigações e consultas", icon: ClipboardList },
+  {
+    id: "reconciliation",
+    label: "Conciliação de estoque",
+    icon: FileSpreadsheet,
+  },
+  { id: "erp", label: "Rotinas de ERP", icon: Workflow },
+  { id: "alerts", label: "Alertas de certidões", icon: Bell },
+  { id: "jobs", label: "Integrações fiscais", icon: Workflow },
   { id: "team", label: "Equipe e acessos", icon: Users },
   { id: "audit", label: "Histórico de ações", icon: History },
 ] as const;
@@ -524,30 +547,39 @@ export function Dashboard({ email }: { email: string }) {
           {NAV.filter(
             (n) => n.id !== "team" || organization?.role === "admin",
           ).map((n) => (
-            <button
-              key={n.id}
-              className={tab === n.id ? "nav-item selected" : "nav-item"}
-              onClick={() => navigate(n.id)}
-            >
-              <n.icon size={19} />
-              <span>{n.label}</span>
-              {n.id === "alerts" && alerts.length > 0 && (
-                <b className="nav-count">{alerts.length}</b>
+            <Fragment key={n.id}>
+              {n.id === "overview" && (
+                <div className="nav-section">CARTEIRA</div>
               )}
-            </button>
+              {n.id === "inbox" && <div className="nav-section">OPERAÇÃO</div>}
+              {n.id === "team" && (
+                <div className="nav-section">ADMINISTRAÇÃO</div>
+              )}
+              <button
+                className={tab === n.id ? "nav-item selected" : "nav-item"}
+                onClick={() => navigate(n.id)}
+              >
+                <n.icon size={19} />
+                <span>{n.label}</span>
+                {n.id === "alerts" && alerts.length > 0 && (
+                  <b className="nav-count">{alerts.length}</b>
+                )}
+              </button>
+            </Fragment>
           ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="connector-note">
             <div>
               <span className="mini-dot amber-dot" />
-              <strong>Conectores pendentes</strong>
+              <strong>Sua operação, organizada</strong>
             </div>
             <p>
-              Configure as integrações para habilitar consultas automáticas.
+              Gestão e conciliação disponíveis. Consulte a situação dos
+              conectores.
             </p>
             <button onClick={() => navigate("jobs")}>
-              Ver integrações <ArrowRight size={14} />
+              Situação das integrações <ArrowRight size={14} />
             </button>
           </div>
           <div className="profile">
@@ -583,12 +615,12 @@ export function Dashboard({ email }: { email: string }) {
             >
               <Menu size={21} />
             </button>
-            <span>Workspace</span>
+            <span>Seu ambiente</span>
             <span>/</span>
             <strong>{NAV.find((n) => n.id === tab)?.label}</strong>
           </div>
           <div className="topbar-right">
-            <span className="pill subtle">MVP · REGISTROS MANUAIS</span>
+            <span className="pill subtle">GESTÃO FISCAL</span>
             <button
               className="icon-button notification-button"
               aria-label="Abrir alertas"
@@ -610,64 +642,81 @@ export function Dashboard({ email }: { email: string }) {
               </div>
               <h1>
                 {tab === "overview"
-                  ? "Sua operação, em dia."
+                  ? "Sua operação fiscal"
                   : NAV.find((n) => n.id === tab)?.label}
               </h1>
               <p className="muted">
-                {tab === "overview"
-                  ? "Uma visão clara das certidões e dos próximos passos da sua carteira."
-                  : tab === "companies"
-                    ? "Organize os CNPJs que fazem parte deste ambiente."
-                    : tab === "certificates"
-                      ? "Resultados, documentos e validades em um só lugar."
-                      : tab === "alerts"
-                        ? "Priorize documentos vencidos, pendências e próximas renovações."
-                        : tab === "jobs"
-                          ? "Acompanhe as solicitações e a disponibilidade das integrações."
-                          : tab === "team"
-                            ? "Compartilhe este ambiente com as permissões adequadas."
-                            : "Rastreabilidade das alterações e consultas deste ambiente."}
+                {
+                  {
+                    overview:
+                      "Certidões, mensagens, obrigações e estoque em uma única visão.",
+                    companies:
+                      "Organize os CNPJs deste ambiente e acompanhe a operação de cada empresa.",
+                    certificates:
+                      "Consulte documentos, resultados e datas de validade.",
+                    inbox:
+                      "Cada notificação com um responsável e um próximo passo.",
+                    obligations:
+                      "Controle as entregas de ITR, ISS, SUFRAMA e outras obrigações.",
+                    reconciliation:
+                      "Compare o inventário fiscal com o saldo do ERP e encontre diferenças.",
+                    erp: "Padronize os processos do ERP com roteiros e histórico de solicitações.",
+                    alerts:
+                      "Priorize certidões vencidas e próximas renovações.",
+                    jobs: "Veja quais integrações estão disponíveis e o histórico de consultas.",
+                    team: "Compartilhe este ambiente com as permissões adequadas.",
+                    audit:
+                      "Acompanhe o histórico de ações realizadas pela equipe.",
+                  }[tab]
+                }
               </p>
             </div>
-            <div className="heading-actions">
-              {orgId && (
-                <button
-                  className="button secondary"
-                  disabled={busy || !data}
-                  onClick={exportCsv}
-                >
-                  <Download size={16} /> Exportar CSV
-                </button>
-              )}
-              {canWrite && orgId && (
-                <button
-                  className="button primary"
-                  onClick={() =>
-                    open(
-                      tab === "companies"
-                        ? "company"
-                        : tab === "jobs"
-                          ? "job"
-                          : tab === "team"
-                            ? "invite"
-                            : "certificate",
-                    )
-                  }
-                  disabled={
-                    tab !== "companies" && tab !== "team" && !companies.length
-                  }
-                >
-                  <Plus size={17} />
-                  {tab === "companies"
-                    ? "Nova empresa"
-                    : tab === "jobs"
-                      ? "Solicitar consulta"
-                      : tab === "team"
-                        ? "Convidar pessoa"
-                        : "Registrar certidão"}
-                </button>
-              )}
-            </div>
+            {!(
+              ["inbox", "obligations", "reconciliation", "erp"] as Tab[]
+            ).includes(tab) && (
+              <div className="heading-actions">
+                {orgId && (
+                  <button
+                    className="button secondary"
+                    disabled={busy || !data}
+                    onClick={exportCsv}
+                  >
+                    <Download size={16} /> Exportar CSV
+                  </button>
+                )}
+                {canWrite && orgId && (
+                  <button
+                    className="button primary"
+                    onClick={() =>
+                      open(
+                        tab === "companies"
+                          ? "company"
+                          : tab === "jobs"
+                            ? "job"
+                            : tab === "team"
+                              ? "invite"
+                              : "certificate",
+                      )
+                    }
+                    disabled={
+                      loading ||
+                      (tab !== "companies" &&
+                        tab !== "team" &&
+                        !companies.length)
+                    }
+                  >
+                    <Plus size={17} />
+                    {tab === "companies"
+                      ? "Nova empresa"
+                      : tab === "jobs"
+                        ? "Solicitar consulta"
+                        : tab === "team"
+                          ? "Convidar pessoa"
+                          : "Registrar certidão"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           {error && (
             <div className="banner error" role="alert">
@@ -764,6 +813,11 @@ export function Dashboard({ email }: { email: string }) {
                       tone="red"
                     />
                   </div>
+                  <ModuleOverview
+                    key={orgId}
+                    orgId={orgId}
+                    navigate={navigate}
+                  />
                   <div className="overview-grid">
                     <section className="card portfolio-card">
                       <div className="section-title">
@@ -878,11 +932,11 @@ export function Dashboard({ email }: { email: string }) {
                           </span>
                           <ArrowRight size={16} />
                         </button>
-                        <button onClick={() => navigate("jobs")}>
+                        <button onClick={() => navigate("inbox")}>
                           <span className="step-number">3</span>
                           <span>
-                            <strong>Prepare as integrações</strong>
-                            <small>Escolha os portais fiscais do piloto</small>
+                            <strong>Acompanhe as mensagens fiscais</strong>
+                            <small>Organize prazos e responsáveis</small>
                           </span>
                           <ArrowRight size={16} />
                         </button>
@@ -911,6 +965,19 @@ export function Dashboard({ email }: { email: string }) {
                     apenas à equipe autorizada.
                   </div>
                 </>
+              )}
+              {(
+                ["inbox", "obligations", "reconciliation", "erp"] as Tab[]
+              ).includes(tab) && (
+                <OperationalModule
+                  key={orgId + tab}
+                  selected={tab as ModuleTab}
+                  orgId={orgId}
+                  companies={companies}
+                  role={organization!.role}
+                  onChange={refresh}
+                  onAddCompany={() => open("company")}
+                />
               )}
               {tab === "companies" && (
                 <section className="card">

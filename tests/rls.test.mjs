@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 const A = "00000000-0000-4000-a000-000000000001",
   B = "00000000-0000-4000-a000-000000000002",
@@ -11,14 +11,11 @@ test("actual Postgres RLS, grants, RPCs, triggers and storage isolate tenants", 
   await db.exec(
     `create role anon nologin;create role authenticated nologin;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth to authenticated,anon;grant execute on function auth.uid() to authenticated,anon;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);alter table storage.objects enable row level security;create function storage.foldername(text) returns text[] language sql immutable as $$select string_to_array($1,'/')$$;grant usage on schema storage to authenticated;grant select,insert,delete on storage.objects to authenticated;grant execute on function storage.foldername(text) to authenticated;insert into auth.users values('${A}'),('${B}'),('${V}'),('${O}');`,
   );
-  const migration = await readFile(
-    new URL(
-      "../supabase/migrations/20261118022044_fiscal_saas_initial.sql",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  await db.exec(migration);
+  const migrationDir = new URL("../supabase/migrations/", import.meta.url);
+  for (const file of (await readdir(migrationDir))
+    .filter((f) => f.endsWith(".sql"))
+    .sort())
+    await db.exec(await readFile(new URL(file, migrationDir), "utf8"));
   const as = async (user) =>
     db.exec(
       `reset role;set role authenticated;select set_config('request.jwt.claim.sub','${user}',false)`,
@@ -265,6 +262,163 @@ test("actual Postgres RLS, grants, RPCs, triggers and storage isolate tenants", 
       /row-level security/,
     );
   });
+  let inboxId, obligationId, routineId;
+  await t.test(
+    "module records enforce tenant parents and audit changes",
+    async () => {
+      await as(A);
+      inboxId = await scalar(
+        "insert into public.fiscal_inbox_messages(organization_id,company_id,subject,source,received_at,due_at) values($1,$2,'Notificação de teste','SEFAZ','2026-01-01','2026-01-30') returning id",
+        [orgA, companyA],
+      );
+      obligationId = await scalar(
+        "insert into public.fiscal_obligations(organization_id,company_id,type,subject,due_at) values($1,$2,'ISS','Declaração mensal','2026-02-01') returning id",
+        [orgA, companyA],
+      );
+      await db.query(
+        "update public.fiscal_inbox_messages set status='in_review',assignee='Equipe' where id=$1",
+        [inboxId],
+      );
+      assert.equal(
+        await scalar(
+          "select count(*) from public.fiscal_audit_events where action='Caixa postal atualizada'",
+        ),
+        1,
+      );
+      await assert.rejects(
+        db.query(
+          "update public.fiscal_inbox_messages set organization_id=$1 where id=$2",
+          [orgB, inboxId],
+        ),
+        /permission denied/,
+      );
+      await assert.rejects(
+        db.query(
+          "insert into public.fiscal_obligations(organization_id,company_id,type,subject,due_at) values($1,$2,'ITR','Referência cruzada','2026-02-01')",
+          [orgA, companyB],
+        ),
+        /foreign key/,
+      );
+    },
+  );
+  await t.test(
+    "reconciliation summaries are calculated by Postgres and records are immutable",
+    async () => {
+      await as(A);
+      const reconciliationId = await scalar(
+        "insert into public.fiscal_reconciliations(organization_id,company_id,inventory_date,fiscal_filename,erp_filename,items) values($1,$2,'2026-01-01','efd.txt','erp.csv',$3::jsonb) returning id",
+        [
+          orgA,
+          companyA,
+          JSON.stringify([
+            { code: "A", status: "matched" },
+            { code: "B", status: "quantity_mismatch" },
+          ]),
+        ],
+      );
+      assert.equal(
+        await scalar(
+          "select total_count from public.fiscal_reconciliations where id=$1",
+          [reconciliationId],
+        ),
+        2,
+      );
+      assert.equal(
+        await scalar(
+          "select matched_count from public.fiscal_reconciliations where id=$1",
+          [reconciliationId],
+        ),
+        1,
+      );
+      await assert.rejects(
+        db.query(
+          "update public.fiscal_reconciliations set items='[]'::jsonb where id=$1",
+          [reconciliationId],
+        ),
+        /permission denied/,
+      );
+    },
+  );
+  await t.test("ERP run requests cannot execute or forge success", async () => {
+    await as(A);
+    routineId = await scalar(
+      "insert into public.fiscal_erp_routines(organization_id,company_id,name,system,operation,steps) values($1,$2,'Extrair relatório','SAP','extract','[\"Exportar dados\"]'::jsonb) returning id",
+      [orgA, companyA],
+    );
+    await db.query(
+      "insert into public.fiscal_erp_runs(organization_id,routine_id) values($1,$2)",
+      [orgA, routineId],
+    );
+    assert.equal(
+      await scalar("select status from public.fiscal_erp_runs"),
+      "blocked",
+    );
+    await assert.rejects(
+      db.query(
+        "insert into public.fiscal_erp_runs(organization_id,routine_id,status) values($1,$2,'success')",
+        [orgA, routineId],
+      ),
+      /permission denied/,
+    );
+  });
+  await t.test("viewers cannot modify messages or obligations", async () => {
+    await as(V);
+    assert.equal(
+      await scalar("select count(*) from public.fiscal_inbox_messages"),
+      1,
+    );
+    const result = await db.query(
+      "update public.fiscal_inbox_messages set status='resolved' where id=$1 returning id",
+      [inboxId],
+    );
+    assert.equal(result.rows.length, 0);
+    const obligationResult = await db.query(
+      "update public.fiscal_obligations set status='done' where id=$1 returning id",
+      [obligationId],
+    );
+    assert.equal(obligationResult.rows.length, 0);
+    await assert.rejects(
+      db.query(
+        "insert into public.fiscal_erp_runs(organization_id,routine_id) values($1,$2)",
+        [orgA, routineId],
+      ),
+      /row-level security/,
+    );
+  });
+  await t.test(
+    "outsiders cannot read any operational module or attach an ERP run across tenants",
+    async () => {
+      await as(B);
+      for (const table of [
+        "fiscal_inbox_messages",
+        "fiscal_obligations",
+        "fiscal_reconciliations",
+        "fiscal_erp_routines",
+        "fiscal_erp_runs",
+      ])
+        assert.equal(
+          await scalar("select count(*) from public." + table),
+          0,
+          table,
+        );
+      assert.equal(
+        (
+          await db.query(
+            "update public.fiscal_inbox_messages set status='resolved' where id=$1 returning id",
+            [inboxId],
+          )
+        ).rows.length,
+        0,
+      );
+      await assert.rejects(
+        db.query(
+          "insert into public.fiscal_erp_runs(organization_id,routine_id) values($1,$2)",
+          [orgB, routineId],
+        ),
+        /foreign key/,
+      );
+    },
+  );
   await t.test(
     "unauthenticated users cannot read records or bootstrap organizations",
     async () => {

@@ -131,8 +131,14 @@ async function handle(req: NextRequest) {
         });
       }
       const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error)
+      if (error) {
+        if (!error.status || error.status >= 500)
+          fail(
+            503,
+            "O serviço de autenticação está indisponível. Tente novamente em instantes.",
+          );
         fail(401, "E-mail ou senha inválidos, ou e-mail ainda não confirmado.");
+      }
       return response({ signed_in: true });
     }
     if (authError || !user)

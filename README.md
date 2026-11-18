@@ -1,6 +1,6 @@
 # Certifica
 
-MVP SaaS em português para gestão de certidões e regularidade fiscal. Next.js 16, React 19, Supabase Auth/Postgres/Storage e Vercel. Nome provisório.
+SaaS em português para gestão de certidões, caixa postal fiscal, obrigações, conciliação de estoque e rotinas de ERP, com interface clara e responsiva. Next.js 16, React 19, Supabase Auth/Postgres/Storage e Vercel. Nome provisório.
 
 ## O que funciona
 
@@ -14,9 +14,20 @@ MVP SaaS em português para gestão de certidões e regularidade fiscal. Next.js
 - Histórico de documentos preservado; indicadores usam o último documento emitido de cada tipo por empresa.
 - Auditoria automática pelo banco; usuários não podem inserir ou alterar eventos diretamente.
 
+## Módulos operacionais
+
+- **Caixa postal fiscal:** registro manual de mensagens, origem, recebimento, prazo, responsável, notas e situações nova/em análise/resolvida. Não abre mensagens nos portais nem registra ciência fiscal.
+- **Obrigações e consultas:** acompanhamento interno de ITR, ISS, SUFRAMA e outras entregas, com prazos, referência e responsável. Marcar como concluída não transmite declarações nem confirma internamento de mercadorias.
+- **Conciliação EFD × ERP:** importa EFD ICMS/IPI TXT e estoque ERP CSV, valida CNPJ e inventário H005 na data selecionada, agrega os H010 de estoque próprio em poder da empresa (`IND_PROP=0`) e compara códigos, unidades e quantidades usando aritmética inteira de 6 casas decimais. Produtos ausentes, diferenças de unidade/quantidade e saldos negativos são destacados. Registros de estoque em terceiros/de terceiros são contados separadamente e excluídos do escopo.
+- **Rotinas ERP:** documenta etapas de SAP, Protheus e outros sistemas, exporta um roteiro JSON e mantém histórico de solicitações. Sem conector, toda solicitação fica bloqueada e nenhuma transação externa é executada.
+
+A conciliação aceita um arquivo de até 1 MiB por origem e até 10.000 produtos. O CSV precisa de cabeçalhos únicos `codigo;unidade;quantidade`, sem separadores de milhar. Há um modelo em `/exemplos/estoque-erp.csv`. Inventários H005 duplicados na mesma data, CNPJs divergentes, quantidades inválidas e múltiplas unidades para o mesmo código no mesmo arquivo são rejeitados. Não há conversão de unidades, tolerância de arredondamento, reconstrução por XML ou análise de movimentações. Confirme que a data-base e o escopo do ERP correspondem ao inventário selecionado. A EFD completa original não é armazenada; são preservados os nomes dos arquivos e os resultados da comparação.
+
+O navegador mostra até 200 produtos por filtro no detalhe; o CSV contém o resultado completo. Listagens operacionais mostram até 200 registros, 100 conciliações e 100 solicitações mais recentes. Mensagens e obrigações permitem atualização de situação, responsável e notas, sempre com auditoria no banco.
+
 ## Limites desta versão
 
-**Não há nenhum conector fiscal ativo.** Uma solicitação é gravada como `blocked`, sem acessar um portal e sem inferir regularidade. Não há agendamento, notificações por e-mail, cobrança de assinaturas, recuperação de senha, edição/exclusão de cadastros ou gestão de certificados digitais nesta versão.
+**Não há nenhum conector fiscal ativo.** Uma solicitação é gravada como `blocked`, sem acessar um portal e sem inferir regularidade. Não há agendamento, notificações por e-mail, cobrança de assinaturas, recuperação de senha, edição/exclusão de empresas e certidões ou gestão de certificados digitais nesta versão.
 
 O painel não atesta regularidade fiscal completa: reflete documentos cadastrados. PDFs são anexados pelo usuário, sem extração automática nem validação de autenticidade. A cobertura inicial do painel é de até 1.000 empresas e 1.000 registros retornados por consulta, sujeita ao limite da Data API do projeto. Para carteiras maiores, implementar paginação/indicadores no banco antes do uso.
 
@@ -62,7 +73,7 @@ npm run typecheck
 npm run build
 ```
 
-Os testes usam PostgreSQL em WASM (PGlite), não mocks de SQL. Aplicam o schema fiscal e validam leitura e escrita entre tenants, vínculos de empresa, perfis, convites, eventos de auditoria, PDFs e acesso anônimo. Auth e Storage são representados por schemas mínimos no teste; isso não substitui um teste do navegador autenticado com o serviço real.
+Os testes usam PostgreSQL em WASM (PGlite), não mocks de SQL. Aplicam o schema fiscal e validam leitura e escrita entre tenants, vínculos de empresa, perfis, convites, eventos de auditoria, PDFs, mensagens, obrigações, conciliações, rotinas ERP e acesso anônimo. Testes de importação cobrem precisão decimal, cabeçalhos, aspas CSV, CNPJ, inventários múltiplos, propriedade e unidades de estoque. Auth e Storage são representados por schemas mínimos no teste; isso não substitui um teste do navegador autenticado com o serviço real.
 
 Foi feita também uma verificação transacional no projeto Supabase real, usando papéis `authenticated`, duas identidades temporárias e rollback integral. Nenhuma conta ou dado de teste foi persistido.
 
